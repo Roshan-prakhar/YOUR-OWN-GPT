@@ -198,4 +198,30 @@ public class DocumentChunkThresholdRetrievalTest {
         assertEquals("hnsw", searchRes12.algoUsed(), "When size=12 (>=10), search must switch to hnsw");
         assertEquals(3, searchRes12.hits().size());
     }
+
+    @Test
+    @DisplayName("Exact N=10 Chunks: Direct Comparison of HNSW vs Brute Force Retrieval Quality & Latency")
+    void testExactTenChunksDirectComparison() {
+        List<Float> query = generateQuery(12345);
+        int k = 3;
+        List<DocItem> chunks10 = generateChunks(10, 54321);
+
+        System.out.println("\n=========================================================================================");
+        System.out.println("   EXACT N = 10 DOCUMENT CHUNKS: DIRECT HNSW vs BRUTE FORCE EVALUATION");
+        System.out.println("=========================================================================================");
+
+        for (String metric : new String[]{"cosine", "manhattan", "euclidean"}) {
+            ThresholdComparisonResult res = comparisonService.evaluateDataset(chunks10, query, k, metric, 50);
+            System.out.printf("METRIC: %s%n", metric.toUpperCase());
+            System.out.printf("  Brute Force Latency: %d µs | Recall: 100.0%% (Ground Truth)%n", res.bruteforceLatencyUs);
+            System.out.printf("  HNSW (ef=50) Latency: %d µs | Recall@3: %.1f%% | Distance Ratio: %.4f%n", 
+                    res.hnswLatencyUs, res.recallAtK * 100.0f, res.distanceRatio);
+            System.out.printf("  Top-1 Match: %s | Exact Ranking Match: %s%n", res.top1MatchesGroundTruth, res.exactGroundTruthMatch);
+            System.out.println(comparisonService.formatReport(res));
+
+            assertEquals("hnsw", res.routedAlgorithm);
+            assertTrue(res.recallAtK >= 0.8f);
+        }
+    }
 }
+
