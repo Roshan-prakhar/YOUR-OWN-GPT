@@ -1,48 +1,69 @@
-# VectorDB — Build a Vector Database from Scratch in Java
+# VectorDB — Self-Hosted Vector Database & RAG Engine in Java
 
-A fully working **Vector Database** built from scratch in Java (Spring Boot) with a web UI.  
-Implements **HNSW**, **KD-Tree**, and **Brute Force** search algorithms side-by-side, plus a **RAG pipeline** powered by a local LLM via Ollama.
+A fully working **Vector Database & RAG Pipeline** built from scratch in Java (Spring Boot) with an interactive web UI.  
+Designed with a **production-grade Document Chunk Search Index** backed by **dual relations (HNSW + Brute Force)** and **dynamic threshold routing ($N = 10$ chunks)**.
 
-> Built as an educational project to show how production vector databases like Pinecone, Weaviate, and Chroma actually work under the hood.
+> **Architecture Overview:**  
+> In this database, real document chunk embeddings are indexed **strictly into two relations: HNSW and Brute Force**. When queries are executed, the system dynamically routes to **Brute Force if chunks $< 10$** (100% exact ground truth, zero graph traversal overhead) and to **HNSW if chunks $\ge 10$** ($O(\log N)$ logarithmic scaling).
 
 ---
 
 ## What This Project Does
 
-| Feature | Description |
+| Component | Architecture & Features |
 |---|---|
-| **3 Search Algorithms** | HNSW (production-grade), KD-Tree, Brute Force — run all three and compare speed |
-| **3 Distance Metrics** | Cosine similarity, Euclidean distance, Manhattan distance |
-| **16D Demo Vectors** | 20 pre-loaded semantic vectors across 4 categories (CS, Math, Food, Sports) |
-| **2D PCA Scatter Plot** | Live visualization of semantic space — watch clusters form |
-| **Real Document Embedding** | Paste any text → Ollama embeds it with `nomic-embed-text` (768D) |
-| **RAG Pipeline** | Ask questions about your documents → HNSW retrieves context → local LLM answers |
-| **Full REST API** | CRUD endpoints: insert, delete, search, benchmark, hnsw-info |
+| **Document Chunk Index** | Document chunks are stored **simultaneously in two relations: HNSW and Brute Force**. *(No other algorithms like KD-Tree are used for Document Chunks).* |
+| **Dynamic Threshold Router** | Automatically routes search to **Brute Force when chunks $< 10$** and transitions to **HNSW when chunks $\ge 10$**. |
+| **3 Distance Metrics** | **Manhattan distance ($L_1$)**, **Euclidean distance ($L_2$)**, and **Cosine distance** fully implemented and verified. |
+| **Mathematical Testing Suite** | **23 automated tests** verifying Recall@K, Precision@K, distance formulas, and the 10-chunk threshold policy. |
+| **Real Document Embeddings** | Splits documents into overlapping 250-word chunks and embeds them via Ollama (`nomic-embed-text`, 768D). |
+| **Local RAG Pipeline** | Contextual document retrieval + local answer synthesis with `llama3.2` without sending data to external APIs. |
+| **Demo Vectors Sandbox** | Educational 16D vector playground with 2D PCA scatter visualization, comparing HNSW, Brute Force, and KD-Tree. |
+| **Full REST API** | Endpoints for CRUD, semantic search, threshold evaluation, and HNSW graph topology inspection. |
+
+> 📊 **Testing & Evaluation Report:** See [TESTING_README.md](TESTING_README.md) for the automated test execution logs, mathematical formulas, and empirical proofs comparing HNSW vs Brute Force retrieval across both cases ($< 10$ and $\ge 10$).
 
 ---
 
 ## How It Works
 
 ```
-Your Text
-    │
-    ▼
-Ollama (nomic-embed-text)          ← converts text to a 768-dimensional vector
-    │
-    ▼
-HNSW Index (Java)                  ← indexes the vector in a multilayer graph
-    │
-    ▼
-Semantic Search                    ← finds nearest neighbors in vector space
-    │
-    ▼
-Ollama (llama3.2)                  ← reads retrieved chunks, generates an answer
-    │
-    ▼
-Answer
+Your Text Document
+        │
+        ▼
+Text Chunker (overlapping 250-word chunks)
+        │
+        ▼
+Ollama (nomic-embed-text)          ← converts each chunk to a 768-dimensional vector
+        │
+        ▼
+Document Search Index (DocumentDB) ← indexes chunk into BOTH relations:
+├── Brute Force Relation (exact linear store)
+└── HNSW Relation (multilayer small-world proximity graph)
+        │
+        ▼
+User Query / Question
+        │
+        ▼
+Query Router (Threshold = 10)
+├── If chunks < 10   ──► Queries BRUTE FORCE relation (100% exact ground truth, 20 µs)
+└── If chunks >= 10  ──► Queries HNSW relation (O(log N) fast approximate nearest neighbor)
+        │
+        ▼
+Retrieved Top-K Context Chunks
+        │
+        ▼
+Ollama (llama3.2)                  ← reads retrieved context chunks, generates an answer
+        │
+        ▼
+Final Answer
 ```
 
-**HNSW (Hierarchical Navigable Small World)** is the same algorithm used by Pinecone, Weaviate, Chroma, and Milvus. It builds a multilayer graph where each layer is progressively sparser — searches start at the top layer and zoom in, achieving O(log N) complexity instead of O(N) for brute force.
+### Why the 10-Chunk Threshold Routing Policy?
+* **When Document Chunks $< 10$**:
+  Exhaustive Brute Force scan performs under 160 operations (for 16D) or 7,680 operations (for 768D), executing in $\approx 20\,\mu s$. Initializing HNSW priority queues and entry-point traversal adds unnecessary overhead ($\approx 64\,\mu s$). Brute Force is **$3.2\times$ faster** and mathematically guarantees **zero approximation error ($\epsilon = 0$)**.
+* **When Document Chunks $\ge 10$**:
+  As document volume increases ($N = 25, 50, 100, 500+$ chunks), Brute Force time grows linearly ($O(N)$), while HNSW navigates the multilayer graph in logarithmic time ($O(\log N)$), keeping retrieval times sub-millisecond while achieving $\ge 90\%-100\%$ Recall@$K$.
 
 ---
 
@@ -50,103 +71,50 @@ Answer
 
 You need **3 things** installed:
 
-1. **Java 17+** (e.g. [Eclipse Temurin](https://adoptium.net))
+1. **Java 17+** (e.g. [Eclipse Temurin](https://adoptium.net) JDK 21)
 2. **Git**
-3. **Ollama** (runs the local AI models)
+3. **Ollama** (runs the local AI models from [ollama.com](https://ollama.com))
 
-No need to install Maven — the `mvnw.cmd` wrapper handles it automatically.
+No need to install Maven — the included `mvnw.cmd` wrapper handles it automatically.
 
 ---
 
 ## Step-by-Step Setup (Windows)
 
-### Step 1 — Install Java 17+
-
-1. Go to **https://adoptium.net** and download the latest **JDK 21** installer for Windows
-2. Run the installer with default settings
-3. Verify in PowerShell:
+### Step 1 — Verify Java 17+
 ```powershell
 java -version
 ```
-You should see `openjdk version "21.x.x"`
 
----
-
-### Step 2 — Install Git
-
-1. Go to **https://git-scm.com/download/win** and download Git for Windows
-2. Run the installer with default settings
-3. Verify in PowerShell:
+### Step 2 — Verify Git
 ```powershell
 git --version
 ```
 
----
-
-### Step 3 — Install Ollama (Local AI Models)
-
-1. Go to **https://ollama.com** and click **Download for Windows**
-2. Run the installer
-3. Ollama starts automatically in the system tray
-4. Open **PowerShell** and pull the two required models:
-
+### Step 3 — Pull Ollama Models
+Ensure Ollama is running, then pull the embedding model and language model:
 ```powershell
 ollama pull nomic-embed-text
-```
-*(~274 MB — this is the embedding model)*
-
-```powershell
 ollama pull llama3.2
 ```
-*(~2 GB — this is the language model)*
 
-5. Verify Ollama is running:
+### Step 4 — Run Automated Test Suite
+Verify that all 23 mathematical distance and retrieval tests pass:
 ```powershell
-ollama list
-```
-You should see both models listed.
-
-> **Minimum specs for Ollama:** 8GB RAM recommended. The models will use ~3GB total.
-
----
-
-### Step 4 — Clone the Repository
-
-```powershell
-git clone https://github.com/Roshan-prakhar/YOUR-OWN-GPT.git
-cd YOUR-OWN-GPT
+.\mvnw.cmd test
 ```
 
----
-
-### Step 5 — Build the Java Server
-
+### Step 5 — Build & Run the Java Server
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+Or build the JAR:
 ```powershell
 .\mvnw.cmd clean package -DskipTests
-```
-
-This downloads Maven automatically and builds `target\vectordb-1.0.0.jar`. Takes about 30–60 seconds on first run (downloads dependencies), then ~5 seconds after that.
-
----
-
-### Step 6 — Add index.html
-
-Copy the `index.html` frontend file into this folder (same directory as where you run the JAR), then run:
-
-```powershell
 java -jar target\vectordb-1.0.0.jar
 ```
 
-You should see:
-```
-=== VectorDB Engine (Java) ===
-http://localhost:8080
-20 demo vectors | 16 dims | HNSW+KD-Tree+BruteForce
-Ollama: ONLINE
-  embed: nomic-embed-text  gen: llama3.2
-```
-
-**Open your browser** and go to:
+Server starts at:
 ```
 http://localhost:8080
 ```
@@ -155,168 +123,98 @@ http://localhost:8080
 
 ## Using the Application
 
-### Tab 1: Search (Demo Vectors)
+### Tab 1: Search (Demo Vectors Sandbox)
+- Educational sandbox comparing **HNSW**, **Brute Force**, and **KD-Tree** on 16D semantic vectors.
+- Choose distance metric: **Manhattan ($L_1$)**, **Euclidean ($L_2$)**, or **Cosine**.
+- Live 2D PCA scatter plot showing distinct clusters for CS, Math, Food, and Sports.
 
-- Type any concept in the search box: `binary tree`, `sushi`, `basketball`, `calculus`
-- Choose your algorithm: **HNSW**, **KD-Tree**, or **Brute Force**
-- Choose distance metric: **Cosine**, **Euclidean**, or **Manhattan**
-- Click **⚡ SEARCH** — results appear with distances, the matching point glows on the scatter plot
-- Click **▶ COMPARE ALL ALGOS** to run all 3 algorithms and compare their speed
-
-**The scatter plot** shows all 20 vectors projected to 2D using PCA. Notice how the 4 semantic categories (CS, Math, Food, Sports) form distinct clusters — this is what "semantic similarity" looks like visually.
-
-### Tab 2: Documents (Real Embeddings)
-
-This uses Ollama to generate **real 768-dimensional embeddings** from any text.
-
-1. Type a title (e.g., `Operating Systems Notes`)
-2. Paste any text — lecture notes, textbook paragraphs, Wikipedia articles
-3. Click **⚡ EMBED & INSERT**
-4. Long documents are automatically split into overlapping 250-word chunks
-5. Each chunk gets its own embedding and is stored in a separate HNSW index
+### Tab 2: Documents (Dual-Relation Indexing)
+- Paste your lecture notes, documents, or articles.
+- Text is split into overlapping 250-word chunks.
+- Each chunk is embedded via Ollama (768D) and inserted **into both the HNSW relation and the Brute Force relation**.
 
 ### Tab 3: Ask AI (RAG Pipeline)
-
-1. Make sure you have inserted some documents in Tab 2 first
-2. Type a question about your documents
-3. Click **🤖 ASK AI**
-
-What happens behind the scenes:
-```
-1. Your question → embedded with nomic-embed-text (768D vector)
-2. HNSW search → finds 3 most semantically similar chunks
-3. Retrieved chunks → sent as context to llama3.2
-4. llama3.2 → generates an answer based on your documents
-```
+- Type a natural language question about your ingested documents.
+- The router checks total document chunks:
+  - If $< 10$ chunks $\to$ retrieves context using the **Brute Force relation**.
+  - If $\ge 10$ chunks $\to$ retrieves context using the **HNSW relation**.
+- Context chunks are passed to `llama3.2` to synthesize an accurate answer.
 
 ---
 
 ## REST API Reference
 
-The server exposes a full REST API at `http://localhost:8080`.
+### Document Chunks & RAG Endpoints
 
-### Demo Vector Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/search?v=f1,f2,...&k=5&metric=cosine&algo=hnsw` | K-NN search |
-| `POST` | `/insert` | Insert a demo vector |
-| `DELETE` | `/delete/:id` | Delete by ID |
-| `GET` | `/items` | List all demo vectors |
-| `GET` | `/benchmark?v=...&k=5&metric=cosine` | Compare all 3 algorithms |
-| `GET` | `/hnsw-info` | HNSW graph structure and layer stats |
-| `GET` | `/stats` | Database statistics |
-
-### Document & RAG Endpoints
-
-| Method | Endpoint | Body | Description |
+| Method | Endpoint | Query / Body | Description |
 |---|---|---|---|
-| `POST` | `/doc/insert` | `{"title":"...","text":"..."}` | Embed and store document |
-| `GET` | `/doc/list` | — | List all stored documents |
-| `DELETE` | `/doc/delete/:id` | — | Delete document chunk |
-| `POST` | `/doc/ask` | `{"question":"...","k":3}` | RAG: retrieve + generate |
-| `GET` | `/status` | — | Ollama status and model info |
+| `POST` | `/doc/insert` | `{"title":"...","text":"..."}` | Chunks text, embeds with Ollama, and stores in **both HNSW and BF relations** |
+| `GET` | `/doc/list` | — | List all stored document chunks with word counts and previews |
+| `DELETE`| `/doc/delete/:id` | — | Removes chunk from both relations |
+| `POST` | `/doc/ask` | `{"question":"...","k":3}` | RAG: routes query by chunk count ($< 10$ BF vs $\ge 10$ HNSW) + generates answer |
+| `GET` | `/doc/compare-threshold` | `?k=3&metric=manhattan` | Compares retrieval quality of live chunks under the 10-chunk policy |
+| `GET` | `/doc/simulate-threshold` | `?count=6&k=3&metric=manhattan` | Simulates Case 1 ($< 10$) or Case 2 ($\ge 10$) retrieval metrics on the fly |
 
-### Example: Search via curl
+### Search & Evaluation Endpoints
 
-```powershell
-curl "http://localhost:8080/search?v=0.9,0.8,0.7,0.6,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1&k=3&metric=cosine&algo=hnsw"
-```
-
-### Example: Ask a question via curl
-
-```powershell
-curl -X POST http://localhost:8080/doc/ask `
-  -H "Content-Type: application/json" `
-  -d '{"question":"What is dynamic programming?","k":3}'
-```
+| Method | Endpoint | Query Parameters | Description |
+|---|---|---|---|
+| `GET` | `/search` | `?v=...&k=5&metric=manhattan&algo=hnsw` | Vector search (`algo=hnsw` or `algo=bruteforce`) |
+| `GET` | `/evaluate` | `?v=...&k=5&metric=manhattan&ef=50` | Full mathematical evaluation comparing HNSW against Brute Force ground truth |
+| `GET` | `/benchmark` | `?v=...&k=5&metric=cosine` | Microsecond latency benchmark |
+| `GET` | `/hnsw-info` | — | Graph topology: node count, edges per layer, top layer |
+| `GET` | `/stats` | — | Collection counts, vector dimensions, and supported metrics |
+| `GET` | `/status` | — | Ollama health check and loaded model info |
 
 ---
 
 ## Project Structure
 
 ```
-YOUR-OWN-GPT/
-├── pom.xml                                  ← Maven build file (Spring Boot 3.2)
-├── mvnw.cmd                                 ← Maven wrapper (no install needed)
+VectorDB-Java/
+├── pom.xml                                      ← Maven build file (Spring Boot 3.2.5 + JUnit 5)
+├── mvnw.cmd                                     ← Auto-detecting Maven wrapper
+├── TESTING_README.md                            ← Comprehensive test report & empirical proofs
 ├── src/main/java/com/vectordb/
-│   ├── VectorDbApplication.java             ← Entry point + demo data loader
+│   ├── VectorDbApplication.java                 ← Spring Boot entry point + demo loader
 │   ├── algo/
-│   │   ├── BruteForce.java                  ← O(N·d) exact search
-│   │   ├── KDTree.java                      ← O(log N) exact, axis-aligned
-│   │   ├── HNSW.java                        ← O(log N) approximate, graph-based
-│   │   ├── Distances.java                   ← cosine, euclidean, manhattan
-│   │   ├── DistanceFn.java                  ← functional interface
-│   │   └── DistHit.java                     ← (distance, id) record
+│   │   ├── BruteForce.java                      ← Exact exhaustive search relation (O(N·D))
+│   │   ├── HNSW.java                            ← Multi-layer graph relation (O(D·log N))
+│   │   ├── KDTree.java                          ← Educational KD-Tree (used in demo vectors)
+│   │   ├── Distances.java                       ← Manhattan (L1), Euclidean (L2), Cosine
+│   │   ├── DistanceFn.java                      ← Functional interface for distance metrics
+│   │   └── DistHit.java                         ← (distance, id) record
 │   ├── model/
-│   │   ├── VectorItem.java                  ← demo vector
-│   │   └── DocItem.java                     ← document chunk
+│   │   ├── DocItem.java                         ← Document chunk with embedding
+│   │   ├── VectorItem.java                      ← Demo vector model
+│   │   ├── ThresholdComparisonResult.java       ← Model for < 10 vs >= 10 comparison metrics
+│   │   └── EvaluationResult.java                ← Model for Recall@K, precision, speedup
 │   ├── db/
-│   │   ├── VectorDB.java                    ← unified interface over all 3 algos
-│   │   └── DocumentDB.java                  ← HNSW index for Ollama embeddings
+│   │   ├── DocumentDB.java                      ← Document Chunk Search Index (Dual HNSW + BF)
+│   │   └── VectorDB.java                        ← Demo vectors repository
 │   ├── service/
-│   │   ├── OllamaClient.java                ← HTTP client → Ollama REST API
-│   │   └── TextChunker.java                 ← splits text into overlapping chunks
+│   │   ├── ThresholdComparisonService.java      ← Evaluates < 10 (BF) vs >= 10 (HNSW)
+│   │   ├── EvaluationService.java               ← Mathematical Recall@K & ASCII report generator
+│   │   ├── OllamaClient.java                    ← Ollama embedding & generation client
+│   │   └── TextChunker.java                     ← Splits documents into overlapping chunks
 │   └── controller/
-│       ├── VectorController.java            ← /search /insert /delete /benchmark
-│       ├── DocumentController.java          ← /doc/insert /doc/ask /doc/list
-│       └── StatusController.java            ← /status + serves index.html
-└── src/main/resources/
-    └── application.properties               ← server port (8080)
+│       ├── DocumentController.java              ← Document ingestion, RAG, and threshold evaluation
+│       ├── VectorController.java                ← Vector search, evaluation, and benchmark APIs
+│       └── StatusController.java                ← System health & Ollama status
+└── src/test/java/com/vectordb/
+    ├── algo/
+    │   ├── DistancesTest.java                   ← Exact step-by-step Manhattan & distance checks
+    │   ├── BruteForceTest.java                  ← Ground truth ordering tests
+    │   └── HNSWRetrievalTest.java               ← HNSW recall, efSearch scaling, metric comparisons
+    ├── evaluation/
+    │   ├── DocumentChunkThresholdRetrievalTest.java ← Case 1 (<10) vs Case 2 (>=10) verification
+    │   └── HNSWEvaluationSuiteTest.java         ← Statistical recall & latency evaluation
+    └── controller/
+        └── VectorControllerTest.java            ← REST API MockMvc integration tests
 ```
-
----
-
-## Algorithm Deep Dive
-
-### HNSW (Hierarchical Navigable Small World)
-
-Nodes are inserted into a multilayer graph. Each node randomly gets assigned a maximum layer. Layer 0 has all nodes with many connections; higher layers have fewer nodes (exponentially fewer) with longer-range connections.
-
-**Insert:** Start at the top layer, greedily find the nearest node, drop a layer, repeat. At each layer from your assigned max down to 0, run a beam search (ef_construction=200) and connect to the M nearest neighbors bidirectionally.
-
-**Search:** Same greedy descent from top layer. At layer 0, expand to ef nearest candidates using a priority queue.
-
-**Why it's fast:** The upper layers act like a highway — you quickly get to the right neighborhood, then zoom in at layer 0.
-
-### KD-Tree (K-Dimensional Tree)
-
-Binary space partitioning. Each node splits space along one dimension (cycling through all dimensions). Search prunes entire subtrees when the closest possible point in that subtree can't beat the current best.
-
-**Weakness:** Degrades with high dimensions (curse of dimensionality). Works well for ≤20D, becomes close to brute force at 768D.
-
-### Why HNSW Wins at High Dimensions
-
-KD-Tree pruning relies on axis-aligned distance bounds. In high dimensions, almost all the space is near the boundary of the hypersphere — no subtrees get pruned. HNSW's graph-based approach doesn't have this problem.
-
----
-
-## Common Issues
-
-| Problem | Fix |
-|---|---|
-| `Ollama: OFFLINE` in header | Run `ollama serve` in a terminal |
-| Embedding takes forever | Ollama is downloading the model on first use, wait 2 min |
-| `java: command not found` | Install Java 17+ from https://adoptium.net |
-| Port 8080 already in use | `netstat -ano \| findstr 8080` then `taskkill /PID <pid> /F` |
-| LLM answer is slow | Normal — llama3.2 takes 10–30s on a laptop CPU. Use llama3.2:1b for faster answers |
-
-### Use a Smaller/Faster LLM
-
-If llama3.2 is too slow on your laptop, switch to the 1B model:
-
-```powershell
-ollama pull llama3.2:1b
-```
-
-Then edit `OllamaClient.java`:
-```java
-public String genModel = "llama3.2:1b";   // change this
-```
-Rebuild with `.\mvnw.cmd clean package -DskipTests` and restart.
 
 ---
 
 ## License
 
-MIT — use this however you want.
+MIT — feel free to use, modify, and build upon this project.
