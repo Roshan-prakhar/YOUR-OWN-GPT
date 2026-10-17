@@ -4,6 +4,8 @@ import com.vectordb.db.DocumentDB;
 import com.vectordb.model.DocItem;
 import com.vectordb.service.OllamaClient;
 import com.vectordb.service.TextChunker;
+import com.vectordb.model.ThresholdComparisonResult;
+import com.vectordb.service.ThresholdComparisonService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,11 +19,13 @@ public class DocumentController {
     private final DocumentDB   documentDB;
     private final OllamaClient ollama;
     private final TextChunker  chunker;
+    private final ThresholdComparisonService thresholdComparisonService;
 
-    public DocumentController(DocumentDB documentDB, OllamaClient ollama, TextChunker chunker) {
+    public DocumentController(DocumentDB documentDB, OllamaClient ollama, TextChunker chunker, ThresholdComparisonService thresholdComparisonService) {
         this.documentDB = documentDB;
         this.ollama     = ollama;
         this.chunker    = chunker;
+        this.thresholdComparisonService = thresholdComparisonService;
     }
 
     @PostMapping("/insert")
@@ -144,5 +148,54 @@ public class DocumentController {
         resp.put("contexts", contexts);
         resp.put("docCount", documentDB.size());
         return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/compare-threshold")
+    public ResponseEntity<?> compareThreshold(
+            @RequestParam(required = false) String v,
+            @RequestParam(defaultValue = "3") int k,
+            @RequestParam(defaultValue = "manhattan") String metric,
+            @RequestParam(defaultValue = "50") int ef) {
+
+        List<DocItem> docs = documentDB.all();
+        if (docs.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No document chunks loaded in index"));
+        }
+
+        List<Float> q;
+        if (v != null && !v.isBlank()) {
+            q = new ArrayList<>();
+            for (String t : v.split(","))
+                try { q.add(Float.parseFloat(t.trim())); } catch (NumberFormatException ignored) {}
+        } else {
+            // Use embedding of the first doc chunk as reference query
+            q = docs.get(0).emb;
+        }
+
+        ThresholdComparisonResult res = thresholdComparisonService.evaluateDataset(docs, q, k, metric, ef);
+        return ResponseEntity.ok(res);
+    }
+
+    @GetMapping("/simulate-threshold")
+    public ResponseEntity<?> simulateThreshold(
+            @RequestParam(defaultValue = "6") int count,
+            @RequestParam(defaultValue = "3") int k,
+            @RequestParam(defaultValue = "manhattan") String metric,
+            @RequestParam(defaultValue = "50") int ef) {
+
+        int dims = 16;
+        Random rng = new Random(42);
+        List<DocItem> simChunks = new ArrayList<>();
+        for (int i = 1; i <= count; i++) {
+            List<Float> emb = new ArrayList<>(dims);
+            for (int d = 0; d < dims; d++) emb.add(rng.nextFloat());
+            simChunks.add(new DocItem(i, "Simulated Chunk #" + i, "Simulated content " + i, emb));
+        }
+
+        List<Float> q = new ArrayList<>(dims);
+        for (int d = 0; d < dims; d++) q.add(rng.nextFloat());
+
+        ThresholdComparisonResult res = thresholdComparisonService.evaluateDataset(simChunks, q, k, metric, ef);
+        return ResponseEntity.ok(res);
     }
 }

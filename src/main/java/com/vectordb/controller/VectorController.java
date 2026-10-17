@@ -2,7 +2,9 @@ package com.vectordb.controller;
 
 import com.vectordb.algo.Distances;
 import com.vectordb.db.VectorDB;
+import com.vectordb.model.EvaluationResult;
 import com.vectordb.model.VectorItem;
+import com.vectordb.service.EvaluationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,9 +16,11 @@ import java.util.stream.Collectors;
 public class VectorController {
 
     private final VectorDB vectorDB;
+    private final EvaluationService evaluationService;
 
-    public VectorController(VectorDB vectorDB) {
+    public VectorController(VectorDB vectorDB, EvaluationService evaluationService) {
         this.vectorDB = vectorDB;
+        this.evaluationService = evaluationService;
     }
 
     @GetMapping("/search")
@@ -118,6 +122,21 @@ public class VectorController {
                 "algorithms", List.of("bruteforce", "kdtree", "hnsw"),
                 "metrics",    List.of("euclidean", "cosine", "manhattan")
         ));
+    }
+
+    @GetMapping("/evaluate")
+    public ResponseEntity<?> evaluate(
+            @RequestParam String v,
+            @RequestParam(defaultValue = "5") int k,
+            @RequestParam(defaultValue = "manhattan") String metric,
+            @RequestParam(defaultValue = "50") int ef) {
+
+        List<Float> q = parseVec(v);
+        if (q.size() != VectorDB.DIMS)
+            return ResponseEntity.badRequest().body(Map.of("error", "need " + VectorDB.DIMS + "D vector"));
+
+        EvaluationResult res = evaluationService.evaluateDataset(vectorDB.all(), q, k, metric, ef, 16, 200);
+        return ResponseEntity.ok(res);
     }
 
     private List<Float> parseVec(String s) {
